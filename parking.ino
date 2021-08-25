@@ -1,23 +1,17 @@
+#include <LiquidCrystal_I2C.h>
 #include <ArduinoJson.h>
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
 
 const char* serverName = "http://13.232.174.224";
 
-const char* ssid = "Porsche@Autobahn";
-const char* password = "$anjay2001!";
+const char* ssid = "SHRIHARIHOME";
+const char* password = "9952666934";
 
-// the following variables are unsigned longs because the time, measured in
-// milliseconds, will quickly become a bigger number than can be stored in an int.
 unsigned long lastTime = 0;
-// Timer set to 10 minutes (600000)
-//unsigned long timerDelay = 600000;
-// Set timer to 5 seconds (5000)
 unsigned long timerDelay = 5000;
-
 
 LiquidCrystal_I2C lcd[3] = {
   LiquidCrystal_I2C(0x27,16,2),
@@ -25,11 +19,12 @@ LiquidCrystal_I2C lcd[3] = {
   LiquidCrystal_I2C(0x26,16,2)
 };
 
-char vehicle_number[3][15] = {"TN37BX1816", "TN38CT8055","TN37HU9090"};
-char slot[3][5] = {"C1","D2","D4"};
-int directions_input[3][3] ={{0,2,3},{0,1,3},{0,1,3}};
+String vehicle_number[2];
+String slot[2];
+int directions_input[2][3];
 float hours = 3;
 int cost = 50;
+int flag = 0;
 String rx_str = "";
 
 
@@ -97,7 +92,6 @@ void straight(int lc, int j, int count)
   lcd[lc].setCursor(0, j);
   lcd[lc].print(vehicle_number[count]);  
   
-
   lcd[lc].setCursor(11,j);
   lcd[lc].print(slot[count]);
 
@@ -172,10 +166,10 @@ void exit_park(int j)
   lcd[2].setCursor(8, 1);
   lcd[2].print(hours);
 }
-  
+
 void directions(int count, int j)        //prints the directions for a car
 {
-  count -= 1;
+//  count = count - 1;
   for(int  i = 0; i<3 ;++i)
   {  
     if (directions_input[count][i] != 3)
@@ -212,18 +206,19 @@ void wifi_connection()
 
 void setup() {
   Serial.begin(9600);
-  wifi_connection();  // connecting to the wifi
+  wifi_connection();
+  lcd[0].home();
+  lcd[1].home();
+  lcd[2].home();
+  lcd[0].clear();
+  lcd[1].clear();
+  lcd[2].clear();
 }
 
-//StaticJsonDocument<256> jsonBuffer;
-//const String httpdata[3] ; 
-
-void http_req(String num)
+void http_req(String num, int counter)
 {
   String httprequestdata = "vehicleNum=" + num;
   Serial.println(httprequestdata);
-//  strcat(httprequestdata, num);
-//  char json[] = "{\"message\":,\"Lot\":,\"directions\":}";
   
   // Send an HTTP POST request depending on timerDelay
   if ((millis() - lastTime) > timerDelay) {
@@ -234,43 +229,52 @@ void http_req(String num)
       HTTPClient http;
 
       StaticJsonBuffer<300> JSONbuffer;
-
+      
       JsonObject& JSONencoder = JSONbuffer.createObject();
-
+      
       JSONencoder["vehicleNum"] = num;
-
       char JSONmessageBuffer[300];
-
       JSONencoder.prettyPrintTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
 
-      Serial.println(JSONmessageBuffer);
-      // Your Domain name with URL path or IP address with path
       http.begin(client, serverName);
       http.addHeader("Content-Type", "application/json");
-//      JsonObject root = deserializeJson(jsonBuffer, http.POST(num));
-      
-//      DeserializationError error = deserializeJson(jsonBuffer, http.POST(httprequestdata));
-        int http_res = http.POST(JSONmessageBuffer);
-//      char* dir = jsonBuffer["directions"];
-//      char* lt = jsonBuffer["lot"];
-//      char* msg = jsonBuffer["message"];
-//       String httpdata = "{}";
-        Serial.print("Server Response: ");
-        Serial.println(http.getString());
-        Serial.print("Server Status Code: ");
-//        Serial.println(httpdata[2]);
+      Serial.println("CALLING SERVER");
+      int http_res = http.POST(JSONmessageBuffer);
+
       Serial.println(http_res);
       if (http_res == 200){
+        
+        const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(1) + 60;
+        DynamicJsonBuffer jsonBuffer(capacity);
+        Serial.println("Server Response: ");
+        
+        Serial.print("Server Status Code: ");
         Serial.println("Received");
-//        if (strcmp(httpdata[0], "0") == 0) {
-//        Serial.print("Slot: ");
-//        Serial.println(httpdata[1]);
-//        Serial.print("Directions: ");
-//        Serial.println(httpdata[2]);
-//        }
-      } 
+        String payload = http.getString();
+        JsonObject& root = jsonBuffer.parseObject(payload);
+        if (!root.success()) {
+          Serial.println("Parsing failed!");
+          return;
+        } 
+        else 
+        {
+          Serial.println(root["message"].as<char*>());
+          Serial.println(root["lot"].as<char*>());
+          Serial.println(root["directions"].as<char*>());
+          slot[counter] = root["lot"].as<char*>();
+          if (root["message"].as<char*>() == "Parking Lot found")
+          {
+            directions_input[counter][0] = root["directions"][0].as<int>();
+            directions_input[counter][1] = root["directions"][1].as<int>();
+            directions_input[counter][2] = root["directions"][2].as<int>();
+            flag = 0;
+          }
+          else
+            flag = 1;
+        }
+      }
       else {
-//        Serial.println("Parking lot not found");
+        Serial.println("wrong request");
       }
       // Free resources
       http.end();
@@ -282,6 +286,7 @@ void http_req(String num)
   }
 }
 
+int counter = 0;
 void loop() {
   delay(500);
   Serial.println("Enter vehicle number:");
@@ -291,25 +296,31 @@ void loop() {
     rx_str = Serial.readString();       // get the character
   }
   Serial.println(rx_str);
-  delay(5000);
- 
-  http_req(rx_str);
-  
-  int counter = 1;
-  while(counter <= 3)
-  {
-    if (counter%2 != 0)
+  delay(1000);
+//  while(counter <= 2)
+//  {
+    if (counter == 0 && rx_str != vehicle_number[1])
     {
-      directions((counter), 0);
-      delay(5000);
-      counter += 1;
+      vehicle_number[counter] = rx_str; 
+      http_req(rx_str, counter);
+      if (flag == 0)
+      {
+        directions(counter, 0);
+        delay(5000);
+      }
+      counter = 1;
     }
-    else
+    else if(counter == 1 && rx_str != vehicle_number[0])
     {
-      directions((counter), 1);
-      delay(5000);
-      counter += 1;
+      vehicle_number[counter] = rx_str;
+      http_req(rx_str, counter);
+      if (flag == 0)
+      {
+        directions(counter, 1);
+        delay(5000);
+      }
+      counter = 0;
     }
-  }
+//  }
   exit_park(0); 
 }
